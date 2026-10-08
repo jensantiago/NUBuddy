@@ -363,23 +363,31 @@ async function submitRegistration() {
   const issue = passwordError(password) || (password !== confirmation ? 'Passwords do not match.' : '');
   if (issue) { state.err = { password: issue }; render(); return; }
   state.busy = true; state.err = {}; render();
-  const { error } = await supabase.auth.signUp({
-    email: form.email,
-    password,
-    options: {
-      emailRedirectTo: `${location.origin}${location.pathname}`,
-      data: {
-        full_name: form.fullName,
-        user_identifier: form.identifier,
-        campus: form.campus,
-        academic_program: form.role === 'student' ? (form.program === 'Other (not listed)' ? form.otherProgram : form.program) : null,
+  try {
+    const { error } = await supabase.auth.signUp({
+      email: form.email,
+      password,
+      options: {
+        emailRedirectTo: `${location.origin}${location.pathname}`,
+        data: {
+          full_name: form.fullName,
+          user_identifier: form.identifier,
+          campus: form.campus,
+          academic_program: form.role === 'student' ? (form.program === 'Other (not listed)' ? form.otherProgram : form.program) : null,
+        },
       },
-    },
-  });
-  state.busy = false;
-  if (error) { state.err = { register: errorText(error) }; render(); return; }
-  form.step = 3;
-  render();
+    });
+    if (error) {
+      state.err = { password: errorText(error) };
+      return;
+    }
+    form.step = 3;
+  } catch (error) {
+    state.err = { password: errorText(error) };
+  } finally {
+    state.busy = false;
+    render();
+  }
 }
 async function submitReport() {
   if (state.busy) return;
