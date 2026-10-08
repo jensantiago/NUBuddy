@@ -373,6 +373,7 @@ async function submitRegistration() {
   const form = state.reg;
   const password = $('#pw1')?.value || '';
   const confirmation = $('#pw2')?.value || '';
+<<<<<<< HEAD
   const email = (form.email || '').trim().toLowerCase();
 
   const issue =
@@ -392,6 +393,14 @@ async function submitRegistration() {
   try {
     const { error } = await supabase.auth.signUp({
       email,
+=======
+  const issue = passwordError(password) || (password !== confirmation ? 'Passwords do not match.' : '');
+  if (issue) { state.err = { password: issue }; render(); return; }
+  state.busy = true; state.err = {}; render();
+  try {
+    const { error } = await supabase.auth.signUp({
+      email: form.email,
+>>>>>>> f3d2a2bd9868199972e8214e0452ee20a94b593d
       password,
       options: {
         emailRedirectTo: `${location.origin}${location.pathname}`,
@@ -399,6 +408,7 @@ async function submitRegistration() {
           full_name: form.fullName,
           user_identifier: form.identifier,
           campus: form.campus,
+<<<<<<< HEAD
           academic_program:
             form.role === 'student'
               ? (form.program === 'Other (not listed)'
@@ -409,11 +419,20 @@ async function submitRegistration() {
       },
     });
 
+=======
+          academic_program: form.role === 'student' ? (form.program === 'Other (not listed)' ? form.otherProgram : form.program) : null,
+        },
+      },
+    });
+>>>>>>> f3d2a2bd9868199972e8214e0452ee20a94b593d
     if (error) {
       state.err = { password: errorText(error) };
       return;
     }
+<<<<<<< HEAD
 
+=======
+>>>>>>> f3d2a2bd9868199972e8214e0452ee20a94b593d
     form.step = 3;
   } catch (error) {
     state.err = { password: errorText(error) };
@@ -610,7 +629,7 @@ document.addEventListener('click', async (event) => {
     case 'register-submit': await submitRegistration(); break;
     case 'to-login': state.view = 'login'; state.err = {}; render(); break;
     case 'forgot': state.view = 'forgot'; state.err = {}; render(); break;
-    case 'verify-help': state.err = { login: 'Students use @students.nu.edu.ph, Facilities staff use @staff.nu.edu.ph, and security guards use @guard.nu.edu.ph. Verify your mailbox before logging in.' }; render(); break;
+    case 'verify-help': state.err = { login: 'Students use @students.nu.edu.ph, Facilities staff use @admin.nu.edu.ph, and security guards use @guard.nu.edu.ph. Verify your mailbox before logging in.' }; render(); break;
     case 'send-reset': {
       state.resetEmail = value('reset-email').toLowerCase();
       if (!schoolRoleForEmail(state.resetEmail)) { state.err = { reset: 'Enter a valid NU school email address.' }; render(); break; }

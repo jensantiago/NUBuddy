@@ -1,13 +1,12 @@
 export const STATUSES = ['Submitted', 'Under Review', 'In Progress', 'Resolved'];
 export const ROLE_DOMAINS = {
   student: 'students.nu.edu.ph',
-  facility_admin: 'staff.nu.edu.ph',
+  facility_admin: 'admin.nu.edu.ph',
   security_guard: 'guard.nu.edu.ph',
 };
 
 const EMAIL_DOMAIN_ROLES = {
   ...Object.fromEntries(Object.entries(ROLE_DOMAINS).map(([role, domain]) => [domain, role])),
-  'admin.nu.edu.ph': 'facility_admin',
 };
 const DEVELOPMENT_ADMIN_EMAIL = 'santiagojenina683@gmail.com';
 

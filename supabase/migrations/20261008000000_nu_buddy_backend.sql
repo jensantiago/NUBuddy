@@ -79,6 +79,21 @@ drop trigger if exists reports_set_updated_at on public.reports;
 create trigger reports_set_updated_at before update on public.reports
 for each row execute function app_private.set_updated_at();
 
+create or replace function app_private.role_for_email(p_email text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select case
+    when lower(btrim(p_email)) = 'santiagojenina683@gmail.com' then 'facility_admin'
+    when lower(btrim(p_email)) ~ '^[^[:space:]@]+@students\.nu\.edu\.ph$' then 'student'
+    when lower(btrim(p_email)) ~ '^[^[:space:]@]+@admin\.nu\.edu\.ph$' then 'facility_admin'
+    when lower(btrim(p_email)) ~ '^[^[:space:]@]+@guard\.nu\.edu\.ph$' then 'security_guard'
+    else null
+  end;
+$$;
+
 create or replace function app_private.normalize_and_validate_auth_email()
 returns trigger
 language plpgsql
@@ -90,7 +105,7 @@ begin
     raise exception 'A school email address is required.';
   end if;
   new.email := lower(btrim(new.email));
-  if new.email !~ '^[^[:space:]@]+@(students|staff|guard)\.nu\.edu\.ph$' then
+  if app_private.role_for_email(new.email) is null then
     raise exception 'Use an approved NU school email domain.';
   end if;
   return new;
@@ -117,12 +132,8 @@ declare
   v_program text;
 begin
   if new.email is null then raise exception 'A school email address is required.'; end if;
-  case split_part(lower(new.email), '@', 2)
-    when 'students.nu.edu.ph' then v_role := 'student';
-    when 'staff.nu.edu.ph' then v_role := 'facility_admin';
-    when 'guard.nu.edu.ph' then v_role := 'security_guard';
-    else raise exception 'Use an approved NU school email domain.';
-  end case;
+  v_role := app_private.role_for_email(new.email);
+  if v_role is null then raise exception 'Use an approved NU school email address.'; end if;
   v_status := case when v_role = 'student' then 'approved' else 'pending' end;
   v_name := nullif(btrim(new.raw_user_meta_data ->> 'full_name'), '');
   v_identifier := nullif(btrim(new.raw_user_meta_data ->> 'user_identifier'), '');
@@ -153,13 +164,9 @@ with candidates as (
     left(nullif(btrim(u.raw_user_meta_data ->> 'user_identifier'), ''), 40) as user_identifier,
     left(nullif(btrim(u.raw_user_meta_data ->> 'campus'), ''), 80) as campus,
     left(nullif(btrim(u.raw_user_meta_data ->> 'academic_program'), ''), 120) as academic_program,
-    case split_part(lower(u.email), '@', 2)
-      when 'students.nu.edu.ph' then 'student'
-      when 'staff.nu.edu.ph' then 'facility_admin'
-      when 'guard.nu.edu.ph' then 'security_guard'
-    end as role
+    app_private.role_for_email(u.email) as role
   from auth.users u
-  where u.email ~ '^[^[:space:]@]+@(students|staff|guard)\.nu\.edu\.ph$'
+  where app_private.role_for_email(u.email) is not null
 ), ranked_candidates as (
   select candidates.*,
          row_number() over (partition by user_identifier order by user_id) as identifier_rank
@@ -191,12 +198,8 @@ declare
   v_role text;
   v_existing_role text;
 begin
-  case split_part(lower(new.email), '@', 2)
-    when 'students.nu.edu.ph' then v_role := 'student';
-    when 'staff.nu.edu.ph' then v_role := 'facility_admin';
-    when 'guard.nu.edu.ph' then v_role := 'security_guard';
-    else raise exception 'Use an approved NU school email domain.';
-  end case;
+  v_role := app_private.role_for_email(new.email);
+  if v_role is null then raise exception 'Use an approved NU school email address.'; end if;
   select role into v_existing_role from public.profiles where user_id = new.id;
   if v_existing_role is distinct from v_role then
     raise exception 'Changing the school email domain cannot change an account role.';
@@ -450,6 +453,7 @@ grant update (is_read) on public.notifications to authenticated;
 revoke all on sequence public.report_number_seq from public, anon, authenticated;
 
 revoke all on function app_private.email_is_verified() from public, anon, authenticated;
+revoke all on function app_private.role_for_email(text) from public, anon, authenticated;
 revoke all on function public.is_active_user() from public, anon, authenticated;
 revoke all on function public.is_active_staff() from public, anon, authenticated;
 revoke all on function public.is_facility_admin() from public, anon, authenticated;

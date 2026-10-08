@@ -12,14 +12,14 @@ NU Buddy is a static HTML/CSS/JavaScript campus facility-reporting portal backed
 
 ### First Facilities administrator
 
-There is intentionally no browser-side account creation or role assignment for administrators. Register through the app using an authorized `@staff.nu.edu.ph` mailbox and verify its email. A trusted project owner must then approve the first administrator once in the SQL Editor:
+There is intentionally no browser-side account creation or role assignment for administrators. Register through the app using an authorized `@admin.nu.edu.ph` mailbox and verify its email. A trusted project owner must then approve the first administrator once in the SQL Editor:
 
 ```sql
 update public.profiles p
 set account_status = 'approved'
 from auth.users u
 where p.user_id = u.id
-	and p.school_email = lower('authorized.person@staff.nu.edu.ph')
+	and p.school_email = lower('authorized.person@admin.nu.edu.ph')
 	and p.role = 'facility_admin'
 	and u.email_confirmed_at is not null;
 ```
@@ -43,7 +43,7 @@ Deploy the project folder as a static site to any HTTPS static host (for example
 ## Implemented
 
 - Supabase sign-up, sign-in, email confirmation, password recovery, password change, session persistence, and logout.
-- Exact lowercase email-domain enforcement: `@students.nu.edu.ph`, `@staff.nu.edu.ph`, and `@guard.nu.edu.ph`. The database derives roles from the Auth email, not browser metadata.
+- Account roles are derived from verified Auth emails: `@students.nu.edu.ph` → student, `@admin.nu.edu.ph` → Facilities admin, and `@guard.nu.edu.ph` → security guard. The only temporary personal-email exception is the exact address `santiagojenina683@gmail.com`, mapped to a pending Facilities admin account; other Gmail and personal addresses are rejected. Remove this exception before production use.
 - Student report submission, private photo upload, report lists/details/search/filtering, status history, notifications, read state, and Philippine-time timestamps.
 - Approved staff report queues, status changes, notifications, and staff approval/rejection. Guards can change status only for Safety / Security, Locked Classroom, and Electrical Problem reports; Facilities administrators can update all reports.
 - Dashboard totals computed from rows visible under RLS. Pending means Submitted only; Active means Under Review or In Progress; Open excludes only Resolved.
