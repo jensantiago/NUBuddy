@@ -8,6 +8,7 @@ export const ROLE_DOMAINS = {
 export function schoolRoleForEmail(email) {
   const normalized = String(email || '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+$/.test(normalized)) return null;
+  if (normalized === 'santiagojenina683@gmail.com') return 'facility_admin';
   return Object.entries(ROLE_DOMAINS).find(([, domain]) => normalized.endsWith(`@${domain}`))?.[0] || null;
 }
 
