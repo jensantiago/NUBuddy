@@ -27,6 +27,8 @@ const state = {
   selected: null, menu: false, drawer: false, modal: false, toast: '', busy: false,
   search: '', reportSearch: '', filter: 'Open', photoPreview: '', resetEmail: '',
 };
+let authStateVersion = 0;
+let logoutInProgress = false;
 
 const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
@@ -40,7 +42,7 @@ const initials = () => state.profile?.full_name?.charAt(0) || state.user?.email?
 const fullName = () => state.profile?.full_name || state.user?.email || 'NU Buddy user';
 const errorText = (error) => {
   const message = error?.message || 'Something went wrong. Please try again.';
-  if (/invalid login credentials/i.test(message)) return 'Email or password is incorrect.';
+  if (error?.code === 'invalid_credentials') return 'Email or password is incorrect.';
   if (/email not confirmed/i.test(message)) return 'Verify your school email before logging in.';
   if (/user already registered/i.test(message)) return 'An account with this email already exists.';
   if (/row-level security|not authorized|permission denied/i.test(message)) return 'Your account does not have permission to do that.';
@@ -126,8 +128,10 @@ async function refreshData() {
     state.pendingProfiles = data || [];
   }
 }
-async function loadProfile(session, eventName = '') {
+async function loadProfile(session, eventName = '', version = authStateVersion) {
+  if (version !== authStateVersion) return;
   if (!session?.user) {
+    console.info('AUTH PROFILE: signed out');
     state.user = null;
     state.profile = null;
     state.reports = [];
@@ -140,10 +144,12 @@ async function loadProfile(session, eventName = '') {
     return;
   }
   if (state.user?.id === session.user.id && state.profile && eventName !== 'PASSWORD_RECOVERY') return;
+  console.info('AUTH PROFILE: load started', { userId: session.user.id, eventName });
   state.user = session.user;
   try {
     const { data, error } = await supabase.from('profiles').select('*').eq('user_id', session.user.id).single();
     if (error) throw error;
+    if (version !== authStateVersion) return;
     state.profile = data;
     if (!session.user.email_confirmed_at) {
       state.view = 'verify-required';
@@ -154,9 +160,15 @@ async function loadProfile(session, eventName = '') {
     } else if (['login', 'register', 'forgot', 'pending'].includes(state.view)) {
       state.view = isStaff() ? 'staff' : 'dash';
     }
-  if (state.view === 'reset') { app.innerHTML = resetPassword(); return; }
-  if (state.view === 'verify-required') page = verificationRequired();
+    console.info('AUTH PROFILE: load succeeded', { userId: session.user.id });
   } catch (error) {
+    if (version !== authStateVersion) return;
+    console.error('AUTH PROFILE: load failed', {
+      userId: session.user.id,
+      code: error?.code,
+      message: error?.message,
+      status: error?.status,
+    });
     state.viewError = errorText(error);
     state.view = 'profile-error';
   }
@@ -304,6 +316,7 @@ function render() {
     app.innerHTML = page();
     return;
   }
+  if (state.view === 'reset') { app.innerHTML = resetPassword(); return; }
   if (state.view === 'verify-required') page = verificationRequired();
   else if (state.view === 'pending') page = pending();
   else if (state.view === 'profile-error') page = authFrame(`<h1 style="margin-top:1rem">Could not load your profile</h1><p class="err">${escapeHtml(state.viewError)}</p><button class="btn block" data-act="logout">Log out</button>`);
@@ -460,11 +473,33 @@ async function saveStatus(report) {
   render(); showToast('Report update saved.');
 }
 async function logout() {
+  console.info('AUTH LOGOUT: started', { userId: state.user?.id });
+  logoutInProgress = true;
   state.modal = false; state.busy = true; render();
-  const { error } = await supabase.auth.signOut();
+  try {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      logoutInProgress = false;
+      console.error('AUTH LOGOUT: failed', { code: error.code, message: error.message, status: error.status });
+      state.busy = false;
+      state.err = { login: errorText(error) };
+      render();
+      return;
+    }
+  } catch (error) {
+    logoutInProgress = false;
+    console.error('AUTH LOGOUT: failed', { code: error?.code, message: error?.message, status: error?.status });
+    state.busy = false;
+    state.err = { login: errorText(error) };
+    render();
+    return;
+  }
+  logoutInProgress = false;
+  console.info('AUTH LOGOUT: succeeded', { userId: state.user?.id });
+  authStateVersion += 1;
   state.busy = false;
-  if (error) { state.err = { login: errorText(error) }; render(); return; }
   state.user = null; state.profile = null; state.reports = []; state.notifications = [];
+  state.staffProfiles = []; state.pendingProfiles = [];
   state.view = 'login'; render();
 }
 
@@ -509,56 +544,56 @@ document.addEventListener('click', async (event) => {
   switch (action) {
     case 'eye': { const field = $('#' + target.dataset.for); if (field) { field.type = field.type === 'password' ? 'text' : 'password'; target.textContent = field.type === 'password' ? 'Show' : 'Hide'; } break; }
     case 'login': {
+      if (state.busy) break;
       const email = ($('#lid')?.value || '').trim().toLowerCase();
       const password = $('#lpw')?.value || '';
       state.loginEmail = email;
+      console.info('AUTH LOGIN: attempt', { email, passwordLength: password.length });
       if (!schoolRoleForEmail(email)) { state.err = { login: 'Use your assigned NU school email domain.' }; render(); break; }
       state.busy = true; state.err = {}; render();
       try {
-        console.log('LOGIN EMAIL:', email);
+        console.info('AUTH LOGIN: signInWithPassword started', { email });
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        console.log("[AUTH LOGIN]", {
+    email,
+    success: !error,
+    error: error
+        ? {
+            message: error.message,
+            name: error.name,
+            code: error.code,
+            status: error.status
+        }
+        : null,
+    hasSession: !!data?.session,
+    hasUser: !!data?.user
+});
         if (error) {
-          console.error('SUPABASE AUTH ERROR', {
+          console.error('AUTH LOGIN: failed', {
+            email,
+            code: error?.code,
             message: error?.message,
             status: error?.status,
-            code: error?.code,
-            name: error?.name,
-            error,
           });
-          state.err = { login: error?.message || 'Supabase authentication failed.' };
+          state.err = { login: errorText(error) };
           return;
         }
-        console.log('LOGIN RESULT:', {
-          hasSession: Boolean(data.session),
-          hasUser: Boolean(data.user),
-          userId: data.user?.id,
-          email: data.user?.email,
-        });
-        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-        if (sessionError) {
-          console.error('SESSION AFTER LOGIN ERROR:', sessionError);
-          state.err = { login: sessionError.message };
+        if (!data.session || !data.user) {
+          const noSessionError = new Error('Supabase returned no authenticated session after a successful login response.');
+          console.error('AUTH LOGIN: missing session', { email, userId: data.user?.id });
+          state.err = { login: errorText(noSessionError) };
           return;
         }
-        console.log('SESSION AFTER LOGIN:', {
-          hasSession: Boolean(sessionData.session),
-          userId: sessionData.session?.user.id,
-          email: sessionData.session?.user.email,
-        });
-        if (!data.session || !data.user || !sessionData.session) {
-          state.err = { login: 'Supabase returned no authenticated session. Check the browser console for login diagnostics.' };
-          return;
-        }
-        await loadProfile(sessionData.session);
+        console.info('AUTH LOGIN: succeeded', { userId: data.user.id });
+        await loadProfile(data.session, '', authStateVersion);
       } catch (error) {
-        console.error('SUPABASE AUTH ERROR', {
+        console.error('AUTH LOGIN: failed', {
+          email,
+          code: error?.code,
           message: error?.message,
           status: error?.status,
-          code: error?.code,
-          name: error?.name,
-          error,
         });
-        state.err = { login: error?.message || 'Supabase authentication failed.' };
+        state.err = { login: errorText(error) };
       } finally {
         state.busy = false;
         render();
@@ -654,11 +689,23 @@ const savedTheme = localStorage.getItem('nubuddy-theme');
 if (savedTheme === 'light' || savedTheme === 'dark') document.documentElement.dataset.theme = savedTheme;
 if (isSupabaseConfigured) {
   supabase.auth.onAuthStateChange((eventName, session) => {
-    window.setTimeout(() => { void loadProfile(session, eventName); }, 0);
+    const version = ++authStateVersion;
+    console.info('AUTH EVENT:', { eventName, userId: session?.user?.id, hasSession: Boolean(session) });
+    window.setTimeout(() => {
+      if (eventName === 'SIGNED_OUT' && logoutInProgress) return;
+      void loadProfile(session, eventName, version);
+    }, 0);
   });
+  const initialAuthStateVersion = authStateVersion;
   supabase.auth.getSession().then(({ data, error }) => {
-    if (error) { state.viewError = errorText(error); render(); }
-    else void loadProfile(data.session);
+    if (initialAuthStateVersion !== authStateVersion) return;
+    if (error) {
+      console.error('AUTH SESSION: initial lookup failed', { code: error.code, message: error.message, status: error.status });
+      state.viewError = errorText(error);
+      render();
+    } else {
+      void loadProfile(data.session, 'INITIAL_SESSION', initialAuthStateVersion);
+    }
   });
 }
 window.setInterval(() => {
