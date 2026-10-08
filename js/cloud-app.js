@@ -326,7 +326,7 @@ function normalizeRegForm() {
   const form = state.reg;
   Object.assign(form, {
     fullName: value('rname'), identifier: value('rid'), campus: value('rcampus'),
-    email: value('rem').toLowerCase(), college: value('rcol'), program: value('rpg'),
+    email: value('rem').trim().toLowerCase(), college: value('rcol'), program: value('rpg'),
     otherProgram: value('rpo'),
   });
 }
@@ -360,26 +360,54 @@ async function submitRegistration() {
   const form = state.reg;
   const password = $('#pw1')?.value || '';
   const confirmation = $('#pw2')?.value || '';
-  const issue = passwordError(password) || (password !== confirmation ? 'Passwords do not match.' : '');
-  if (issue) { state.err = { password: issue }; render(); return; }
-  state.busy = true; state.err = {}; render();
-  const { error } = await supabase.auth.signUp({
-    email: form.email,
-    password,
-    options: {
-      emailRedirectTo: `${location.origin}${location.pathname}`,
-      data: {
-        full_name: form.fullName,
-        user_identifier: form.identifier,
-        campus: form.campus,
-        academic_program: form.role === 'student' ? (form.program === 'Other (not listed)' ? form.otherProgram : form.program) : null,
-      },
-    },
-  });
-  state.busy = false;
-  if (error) { state.err = { register: errorText(error) }; render(); return; }
-  form.step = 3;
+  const email = (form.email || '').trim().toLowerCase();
+
+  const issue =
+    passwordError(password) ||
+    (password !== confirmation ? 'Passwords do not match.' : '');
+
+  if (issue) {
+    state.err = { password: issue };
+    render();
+    return;
+  }
+
+  state.busy = true;
+  state.err = {};
   render();
+
+  try {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${location.origin}${location.pathname}`,
+        data: {
+          full_name: form.fullName,
+          user_identifier: form.identifier,
+          campus: form.campus,
+          academic_program:
+            form.role === 'student'
+              ? (form.program === 'Other (not listed)'
+                  ? form.otherProgram
+                  : form.program)
+              : null,
+        },
+      },
+    });
+
+    if (error) {
+      state.err = { password: errorText(error) };
+      return;
+    }
+
+    form.step = 3;
+  } catch (error) {
+    state.err = { password: errorText(error) };
+  } finally {
+    state.busy = false;
+    render();
+  }
 }
 async function submitReport() {
   if (state.busy) return;
