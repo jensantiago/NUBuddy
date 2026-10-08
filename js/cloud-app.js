@@ -509,19 +509,26 @@ document.addEventListener('click', async (event) => {
   switch (action) {
     case 'eye': { const field = $('#' + target.dataset.for); if (field) { field.type = field.type === 'password' ? 'text' : 'password'; target.textContent = field.type === 'password' ? 'Show' : 'Hide'; } break; }
     case 'login': {
-      const email = value('lid').toLowerCase(); state.loginEmail = email;
+      const email = ($('#lid')?.value || '').trim().toLowerCase();
+      const password = $('#lpw')?.value || '';
+      state.loginEmail = email;
       if (!schoolRoleForEmail(email)) { state.err = { login: 'Use your assigned NU school email domain.' }; render(); break; }
       state.busy = true; state.err = {}; render();
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password: $('#lpw')?.value || '' });
-      state.busy = false;
-     if (error) {
-  console.error('SUPABASE LOGIN ERROR:', error);
-  state.err = {
-    login: `${error.message} | ${error.status || ''} | ${error.code || ''}`
-  };
-  render();
-}
-      else await loadProfile(data.session);
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) {
+          console.error('SUPABASE LOGIN ERROR:', error);
+          state.err = { login: errorText(error) };
+          return;
+        }
+        await loadProfile(data.session);
+      } catch (error) {
+        console.error('SUPABASE LOGIN ERROR:', error);
+        state.err = { login: errorText(error) };
+      } finally {
+        state.busy = false;
+        render();
+      }
       break;
     }
     case 'register': state.reg = { step: 1, role: 'student' }; state.err = {}; state.view = 'register'; render(); break;
