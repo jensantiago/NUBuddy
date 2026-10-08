@@ -119,7 +119,7 @@ begin
   if new.email is null then raise exception 'A school email address is required.'; end if;
   case split_part(lower(new.email), '@', 2)
     when 'students.nu.edu.ph' then v_role := 'student';
-    when 'staff.nu.edu.ph' then v_role := 'facility_admin';
+    when 'admin.nu.edu.ph' then v_role := 'facility_admin';
     when 'guard.nu.edu.ph' then v_role := 'security_guard';
     else raise exception 'Use an approved NU school email domain.';
   end case;
@@ -155,7 +155,7 @@ with candidates as (
     left(nullif(btrim(u.raw_user_meta_data ->> 'academic_program'), ''), 120) as academic_program,
     case split_part(lower(u.email), '@', 2)
       when 'students.nu.edu.ph' then 'student'
-      when 'staff.nu.edu.ph' then 'facility_admin'
+      when 'admin.nu.edu.ph' then 'facility_admin'
       when 'guard.nu.edu.ph' then 'security_guard'
     end as role
   from auth.users u
@@ -193,7 +193,7 @@ declare
 begin
   case split_part(lower(new.email), '@', 2)
     when 'students.nu.edu.ph' then v_role := 'student';
-    when 'staff.nu.edu.ph' then v_role := 'facility_admin';
+    when 'admin.nu.edu.ph' then v_role := 'facility_admin';
     when 'guard.nu.edu.ph' then v_role := 'security_guard';
     else raise exception 'Use an approved NU school email domain.';
   end case;

@@ -500,7 +500,7 @@ document.addEventListener('click', async (event) => {
     case 'register-submit': await submitRegistration(); break;
     case 'to-login': state.view = 'login'; state.err = {}; render(); break;
     case 'forgot': state.view = 'forgot'; state.err = {}; render(); break;
-    case 'verify-help': state.err = { login: 'Students use @students.nu.edu.ph, Facilities staff use @staff.nu.edu.ph, and security guards use @guard.nu.edu.ph. Verify your mailbox before logging in.' }; render(); break;
+    case 'verify-help': state.err = { login: 'Students use @students.nu.edu.ph, Facilities staff use @admin.nu.edu.ph, and security guards use @guard.nu.edu.ph. Verify your mailbox before logging in.' }; render(); break;
     case 'send-reset': {
       state.resetEmail = value('reset-email').toLowerCase();
       if (!schoolRoleForEmail(state.resetEmail)) { state.err = { reset: 'Enter a valid NU school email address.' }; render(); break; }

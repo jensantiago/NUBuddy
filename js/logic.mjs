@@ -1,7 +1,7 @@
 export const STATUSES = ['Submitted', 'Under Review', 'In Progress', 'Resolved'];
 export const ROLE_DOMAINS = {
   student: 'students.nu.edu.ph',
-  facility_admin: 'staff.nu.edu.ph',
+  facility_admin: 'admin.nu.edu.ph',
   security_guard: 'guard.nu.edu.ph',
 };
 
