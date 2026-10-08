@@ -30,10 +30,17 @@ test('dashboard counts use the shared exact status definitions', () => {
   });
 });
 
-test('school email role matching accepts only the exact approved domains', () => {
+test('school email role matching accepts official domains and only the exact development account', () => {
   for (const [role, domain] of Object.entries(ROLE_DOMAINS)) {
     assert.equal(schoolRoleForEmail(`person@${domain}`), role);
   }
+  assert.equal(schoolRoleForEmail('test@students.nu.edu.ph'), 'student');
+  assert.equal(schoolRoleForEmail('test@admin.nu.edu.ph'), 'facility_admin');
+  assert.equal(schoolRoleForEmail('test@guard.nu.edu.ph'), 'security_guard');
+  assert.equal(schoolRoleForEmail('santiagojenina683@gmail.com'), 'facility_admin');
+  assert.equal(schoolRoleForEmail('test@gmail.com'), null);
+  assert.equal(schoolRoleForEmail('santiagojenina683+test@gmail.com'), null);
+  assert.equal(schoolRoleForEmail('test@constructor'), null);
   assert.equal(schoolRoleForEmail('PERSON@STUDENTS.NU.EDU.PH'), 'student');
   assert.equal(schoolRoleForEmail('person@nu.edu.ph'), null);
   assert.equal(schoolRoleForEmail('person@students.nu.edu.ph.attacker.test'), null);

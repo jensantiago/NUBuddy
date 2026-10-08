@@ -5,10 +5,18 @@ export const ROLE_DOMAINS = {
   security_guard: 'guard.nu.edu.ph',
 };
 
+const EMAIL_DOMAIN_ROLES = {
+  ...Object.fromEntries(Object.entries(ROLE_DOMAINS).map(([role, domain]) => [domain, role])),
+  'admin.nu.edu.ph': 'facility_admin',
+};
+const DEVELOPMENT_ADMIN_EMAIL = 'santiagojenina683@gmail.com';
+
 export function schoolRoleForEmail(email) {
   const normalized = String(email || '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+$/.test(normalized)) return null;
-  return Object.entries(ROLE_DOMAINS).find(([, domain]) => normalized.endsWith(`@${domain}`))?.[0] || null;
+  if (normalized === DEVELOPMENT_ADMIN_EMAIL) return 'facility_admin';
+  const domain = normalized.slice(normalized.lastIndexOf('@') + 1);
+  return Object.hasOwn(EMAIL_DOMAIN_ROLES, domain) ? EMAIL_DOMAIN_ROLES[domain] : null;
 }
 
 export function reportCounts(reports) {
