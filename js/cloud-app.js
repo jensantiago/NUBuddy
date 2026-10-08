@@ -514,7 +514,13 @@ document.addEventListener('click', async (event) => {
       state.busy = true; state.err = {}; render();
       const { data, error } = await supabase.auth.signInWithPassword({ email, password: $('#lpw')?.value || '' });
       state.busy = false;
-      if (error) { state.err = { login: errorText(error) }; render(); }
+     if (error) {
+  console.error('SUPABASE LOGIN ERROR:', error);
+  state.err = {
+    login: `${error.message} | ${error.status || ''} | ${error.code || ''}`
+  };
+  render();
+}
       else await loadProfile(data.session);
       break;
     }
