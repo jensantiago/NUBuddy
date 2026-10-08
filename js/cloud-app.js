@@ -515,16 +515,50 @@ document.addEventListener('click', async (event) => {
       if (!schoolRoleForEmail(email)) { state.err = { login: 'Use your assigned NU school email domain.' }; render(); break; }
       state.busy = true; state.err = {}; render();
       try {
+        console.log('LOGIN EMAIL:', email);
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
-          console.error('SUPABASE LOGIN ERROR:', error);
-          state.err = { login: errorText(error) };
+          console.error('SUPABASE AUTH ERROR', {
+            message: error?.message,
+            status: error?.status,
+            code: error?.code,
+            name: error?.name,
+            error,
+          });
+          state.err = { login: error?.message || 'Supabase authentication failed.' };
           return;
         }
-        await loadProfile(data.session);
+        console.log('LOGIN RESULT:', {
+          hasSession: Boolean(data.session),
+          hasUser: Boolean(data.user),
+          userId: data.user?.id,
+          email: data.user?.email,
+        });
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) {
+          console.error('SESSION AFTER LOGIN ERROR:', sessionError);
+          state.err = { login: sessionError.message };
+          return;
+        }
+        console.log('SESSION AFTER LOGIN:', {
+          hasSession: Boolean(sessionData.session),
+          userId: sessionData.session?.user.id,
+          email: sessionData.session?.user.email,
+        });
+        if (!data.session || !data.user || !sessionData.session) {
+          state.err = { login: 'Supabase returned no authenticated session. Check the browser console for login diagnostics.' };
+          return;
+        }
+        await loadProfile(sessionData.session);
       } catch (error) {
-        console.error('SUPABASE LOGIN ERROR:', error);
-        state.err = { login: errorText(error) };
+        console.error('SUPABASE AUTH ERROR', {
+          message: error?.message,
+          status: error?.status,
+          code: error?.code,
+          name: error?.name,
+          error,
+        });
+        state.err = { login: error?.message || 'Supabase authentication failed.' };
       } finally {
         state.busy = false;
         render();
