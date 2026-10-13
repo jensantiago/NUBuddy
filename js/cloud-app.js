@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { isSupabaseConfigured, SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from './config.js';
-import { canUpdateReportStatus, greeting, localDate, localDateTime, registrationPasswordChecks, reportCounts, ROLE_DOMAINS, schoolRoleForEmail, STATUSES } from './logic.mjs';
+import { canUpdateReportStatus, greeting, localDate, localDateTime, registrationPasswordChecks, reportCounts, reportMatchesDateFilter, ROLE_DOMAINS, schoolRoleForEmail, STATUSES } from './logic.mjs';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: true },
@@ -23,8 +23,8 @@ const CAMPUSES = ['Manila', 'Baliwag', 'Clark', 'Dasmariñas', 'Laguna', 'Lipa',
 const state = {
   view: 'login', user: null, profile: null, reports: [], notifications: [], staffProfiles: [],
   pendingProfiles: [], viewError: '', err: {}, reg: { step: 1, role: 'student' }, draft: {},
-  selected: null, menu: false, drawer: false, modal: false, toast: '', busy: false,
-  search: '', reportSearch: '', filter: 'Open', photoPreview: '', resetEmail: '',
+  selected: null, menu: false, drawer: false, modal: false, toast: '', busy: false, statusUpdatingReportId: null,
+  search: '', reportSearch: '', filter: 'Open', reportCategory: 'All', reportBuilding: 'All', reportDate: 'All', staffCategory: 'All', staffBuilding: 'All', staffDate: 'All', photoPreview: '', resetEmail: '',
 };
 let authStateVersion = 0;
 let logoutInProgress = false;
@@ -277,7 +277,7 @@ function dashboard() {
   const counts = reportCounts(reports);
   const staff = isStaff();
   const profile = state.profile;
-  return `<h1>Good ${greeting()}, ${escapeHtml(fullName())}!</h1><p class="mut">${escapeHtml(profile.user_identifier || ROLE_LABEL[profile.role])} · ${escapeHtml(profile.academic_program || ROLE_LABEL[profile.role])} · ${escapeHtml(profile.campus)} Campus</p>${staff ? '' : `<div class="cta"><div><h2>Report a facility issue</h2><p>Found a broken chair, damaged equipment, electrical problem, or another facility issue?</p></div><button class="btn gold" data-act="nav" data-v="report">Report an Issue</button></div>`}<h2 style="margin-top:1.4rem">Report summary</h2><div class="grid g4">${statCard(counts.total, 'Total reports')}${statCard(counts.open, 'Open')}${statCard(counts.pending, 'Pending')}${statCard(counts.active, 'Active')}${statCard(counts.progress, 'In progress')}${statCard(counts.resolved, 'Resolved')}</div><h2 style="margin-top:1.4rem">${staff ? 'Latest report' : 'Quick actions'}</h2>${staff ? (reports[0] ? latestReport(reports[0]) : '<div class="card mut">No reports have been submitted yet.</div>') : `<div class="grid g4">${[['report', '＋', 'Report Facility Issue'], ['reports', '☰', 'My Reports'], ['notifs', '🔔', 'Notifications'], ['profile', '☺', 'Profile']].map((item) => `<button class="qa" data-act="nav" data-v="${item[0]}"><span class="av">${item[1]}</span>${item[2]}</button>`).join('')}</div><h2 style="margin-top:1.4rem">Latest report</h2>${reports[0] ? latestReport(reports[0]) : '<div class="card mut">No reports yet. Use “Report an Issue” to send your first one.</div>'}`}`;
+  return `<h1>Good ${greeting()}, ${escapeHtml(fullName())}!</h1><p class="mut">${escapeHtml(profile.user_identifier || ROLE_LABEL[profile.role])} · ${escapeHtml(profile.academic_program || ROLE_LABEL[profile.role])} · ${escapeHtml(profile.campus)} Campus</p>${staff ? '' : `<div class="cta"><div><h2>Report a facility issue</h2><p>Found a broken chair, damaged equipment, electrical problem, or another facility issue?</p></div><button class="btn gold" data-act="nav" data-v="report">Report an Issue</button></div>`}<h2 style="margin-top:1.4rem">Report summary</h2><div class="grid g4 summary-grid">${statCard(counts.total, 'Total reports')}${statCard(counts.open, 'Open')}${statCard(counts.pending, 'Pending')}${statCard(counts.active, 'Active')}${statCard(counts.progress, 'In progress')}${statCard(counts.resolved, 'Resolved')}</div><h2 style="margin-top:1.4rem">${staff ? 'Latest report' : 'Quick actions'}</h2>${staff ? (reports[0] ? latestReport(reports[0]) : '<div class="card mut">No reports have been submitted yet.</div>') : `<div class="grid g4">${[['reports', '☰', 'My Reports'], ['notifs', '🔔', 'Notifications'], ['profile', '☺', 'Profile']].map((item) => `<button class="qa" data-act="nav" data-v="${item[0]}"><span class="av">${item[1]}</span>${item[2]}</button>`).join('')}</div><h2 style="margin-top:1.4rem">Latest report</h2>${reports[0] ? latestReport(reports[0]) : '<div class="card mut">No reports yet. Use “Report an Issue” to send your first one.</div>'}`}`;
 }
 function latestReport(report) {
   return `<div class="card"><div style="display:flex;justify-content:space-between;gap:.5rem;flex-wrap:wrap"><b>${escapeHtml(report.title)}</b>${badge(report.status)}</div><p class="mut sm">${escapeHtml(report.reportNumber)} · ${escapeHtml(report.room)}</p><button class="btn ghost" data-act="open-report" data-id="${report.id}">Track status</button></div>`;
@@ -288,8 +288,15 @@ function reportForm() {
 }
 function reportList(title) {
   const query = state.reportSearch.toLowerCase();
-  const reports = visibleReports().filter((report) => (!query || `${report.title} ${report.reportNumber} ${report.room} ${report.category}`.toLowerCase().includes(query)) && matchesFilter(report, state.filter));
-  return `<h1>${title}</h1><p class="mut">${isStaff() ? 'Reports visible to your approved staff account.' : 'Only reports you submitted are shown here.'}</p><input id="report-search" type="search" aria-label="Search reports" placeholder="Search reports" value="${escapeHtml(state.reportSearch)}"><div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:.8rem 0">${['All', 'Open', 'Pending', 'Active', 'In Progress', 'Resolved'].map((filter) => `<button class="btn ${state.filter === filter ? '' : 'ghost'}" data-act="report-filter" data-v="${filter}" style="min-height:36px;padding:.3rem .8rem">${filter}</button>`).join('')}</div>${reports.length ? `<div class="card tw"><table><thead><tr><th>Report</th><th>Location</th><th>Date</th><th>Status</th></tr></thead><tbody>${reports.map((report) => `<tr class="row" tabindex="0" data-act="open-report" data-id="${report.id}"><td><b>${escapeHtml(report.title)}</b><br><span class="sm mut">${escapeHtml(report.reportNumber)} · ${escapeHtml(report.category)}</span></td><td>${escapeHtml(report.building || report.bldg)}, ${escapeHtml(report.floor)}<br>${escapeHtml(report.room)}</td><td>${localDate(report.createdAt)}</td><td>${badge(report.status)}</td></tr>`).join('')}</tbody></table></div>` : `<div class="card" style="text-align:center"><p class="mut">${query || state.filter !== 'All' ? 'No reports match your search or filter.' : 'No reports have been submitted yet.'}</p>${isStaff() ? '' : '<button class="btn gold" data-act="nav" data-v="report">Report an Issue</button>'}</div>`}`;
+  const reports = visibleReports().filter((report) => {
+    const building = report.building || report.bldg;
+    return matchesFilter(report, state.filter)
+      && (state.reportCategory === 'All' || report.category === state.reportCategory)
+      && (state.reportBuilding === 'All' || building === state.reportBuilding)
+      && reportMatchesDateFilter(report.createdAt, state.reportDate)
+      && (!query || `${report.title} ${report.reportNumber} ${report.room} ${report.floor} ${building} ${report.category}`.toLowerCase().includes(query));
+  });
+  return `<h1>${title}</h1><p class="mut">${isStaff() ? 'Reports visible to your approved staff account.' : 'Only reports you submitted are shown here.'}</p><div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:.8rem 0">${['All', 'Open', 'Pending', 'Active', 'In Progress', 'Resolved'].map((filter) => `<button class="btn ${state.filter === filter ? '' : 'ghost'}" data-act="report-filter" data-v="${filter}" style="min-height:36px;padding:.3rem .8rem">${filter}</button>`).join('')}</div><div class="grid report-filters"><div>${select('report-category-filter', 'Category', ['All', ...CATS], state.reportCategory)}</div><div>${select('report-building-filter', 'Building', ['All', ...BLDG], state.reportBuilding)}</div><div>${select('report-date-filter', 'Date received', ['All', 'Last 7 days', 'Last 30 days', 'Older than 30 days'], state.reportDate === '7days' ? 'Last 7 days' : state.reportDate === '30days' ? 'Last 30 days' : state.reportDate === 'older' ? 'Older than 30 days' : 'All')}</div></div><input id="report-search" type="search" aria-label="Search reports" placeholder="Search reports" value="${escapeHtml(state.reportSearch)}">${reports.length ? `<div class="card tw"><table><thead><tr><th>Report</th><th>Category</th><th>Location</th><th>Date</th><th>Status</th></tr></thead><tbody>${reports.map((report) => `<tr class="row" tabindex="0" data-act="open-report" data-id="${report.id}"><td><b>${escapeHtml(report.title)}</b><br><span class="sm mut">${escapeHtml(report.reportNumber)}</span></td><td>${escapeHtml(report.category)}</td><td>${escapeHtml(report.building || report.bldg)}, ${escapeHtml(report.floor)}<br>${escapeHtml(report.room)}</td><td>${localDate(report.createdAt)}</td><td>${badge(report.status)}</td></tr>`).join('')}</tbody></table></div>` : `<div class="card" style="text-align:center"><p class="mut">${query || state.filter !== 'All' || state.reportCategory !== 'All' || state.reportBuilding !== 'All' || state.reportDate !== 'All' ? 'No reports match your search or filter.' : 'No reports have been submitted yet.'}</p>${isStaff() ? '' : '<button class="btn gold" data-act="nav" data-v="report">Report an Issue</button>'}</div>`}`;
 }
 function matchesFilter(report, filter) {
   if (filter === 'All') return true;
@@ -331,25 +338,51 @@ function reportDone() {
 }
 function staffReports() {
   const query = state.search.toLowerCase();
-  const filters = ['Open', 'All', 'Pending', 'Active', 'In Progress', 'Resolved', ...CATS];
   const reports = visibleReports().filter((report) => {
-    const byStatus = ['All', 'Open', 'Pending', 'Active', 'In Progress', 'Resolved'].includes(state.filter)
-      ? matchesFilter(report, state.filter) : report.category === state.filter;
-    return byStatus && (!query || `${report.title} ${report.reportNumber} ${report.room} ${report.category}`.toLowerCase().includes(query));
+    const byStatus = matchesFilter(report, state.filter);
+    const byCategory = state.staffCategory === 'All' || report.category === state.staffCategory;
+    const byBuilding = state.staffBuilding === 'All' || report.building === state.staffBuilding || report.bldg === state.staffBuilding;
+    const byDate = reportMatchesDateFilter(report.createdAt, state.staffDate);
+    return byStatus && byCategory && byBuilding && byDate && (!query || `${report.title} ${report.reportNumber} ${report.room} ${report.building} ${report.category}`.toLowerCase().includes(query));
   });
+  const canManage = canUpdateReportStatus(state.profile);
   return reports.length ? reports.map((report) => {
     var owner = state.staffProfiles.find((profile) => profile.user_id === report.owner);
-    return `<tr class="row" tabindex="0" data-act="select-report" data-id="${report.id}"><td><b>${escapeHtml(report.title)}</b><br><span class="sm mut">${escapeHtml(report.reportNumber)} · ${escapeHtml(report.category)}</span></td><td class="sm">${escapeHtml(report.building || report.bldg)}<br>${escapeHtml(report.room)}</td><td class="sm">${escapeHtml(profileName(owner))}</td><td class="sm">${localDate(report.createdAt)}</td><td>${badge(report.status)}</td></tr>`;
-  }).join('') : '<tr><td colspan="5" class="mut">No reports match. Clear the search or choose another filter.</td></tr>';
+    return `<tr class="row" tabindex="0" data-act="select-report" data-id="${report.id}"><td><b>${escapeHtml(report.title)}</b><br><span class="sm mut">${escapeHtml(report.reportNumber)}</span></td><td class="sm">${escapeHtml(report.category)}</td><td class="sm">${escapeHtml(report.building || report.bldg)}<br>${escapeHtml(report.floor)} · ${escapeHtml(report.room)}</td><td class="sm">${escapeHtml(profileName(owner))}</td><td class="sm">${localDate(report.createdAt)}</td><td>${badge(report.status)}${state.statusUpdatingReportId === report.id ? '<span class="sm mut" role="status">Updating…</span>' : ''}${canManage ? `<label class="sm mut" for="queue-status-${report.id}">Update status</label><select class="queue-status" id="queue-status-${report.id}" data-act="queue-status" data-id="${report.id}" aria-label="Update status for ${escapeHtml(report.reportNumber)}" ${state.busy ? 'disabled' : ''}>${STAGES.map((status) => `<option value="${escapeHtml(status)}" ${status === report.status ? 'selected' : ''} ${stageIndex(status) < report.stage ? 'disabled' : ''}>${escapeHtml(status)}</option>`).join('')}</select>` : ''}</td></tr>`;
+  }).join('') : '<tr><td colspan="6" class="mut">No reports match. Clear the search or choose another filter.</td></tr>';
 }
 function staffDashboard() {
   const reports = visibleReports();
   const counts = reportCounts(reports);
   const selected = reports.find((report) => report.id === state.selected);
-  const filters = ['Open', 'All', 'Pending', 'Active', 'In Progress', 'Resolved', ...CATS];
   const owner = selected && state.staffProfiles.find((profile) => profile.user_id === selected.owner);
   const canManage = selected && canUpdateReportStatus(state.profile);
-  return `<div style="background:var(--sb);color:#fff;padding:.8rem 1.2rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap"><div class="brand"><span class="logo">NU</span>NU Buddy ${state.profile.role === 'security_guard' ? 'Security' : 'Facilities'}</div><span style="flex:1"></span><span class="sm">${escapeHtml(fullName())} · ${ROLE_LABEL[state.profile.role]}</span><button class="btn gold" data-act="askout" style="min-height:40px">Log Out</button></div><div class="pad" style="max-width:1200px"><h1>Good ${greeting()}, ${escapeHtml(fullName())}.</h1><p class="mut">Review reports and follow their status through resolution.</p><div class="grid g4" style="margin-bottom:1rem">${[['All', 'Total reports', counts.total], ['Open', 'Open', counts.open], ['Pending', 'Pending', counts.pending], ['Active', 'Active', counts.active], ['In Progress', 'In Progress', counts.progress], ['Resolved', 'Resolved', counts.resolved]].map(([filter, label, count]) => `<button class="card stat stb ${state.filter === filter ? 'on' : ''}" data-act="staff-filter" data-v="${filter}" aria-pressed="${state.filter === filter}"><b>${count}</b>${label}</button>`).join('')}</div><div class="qg"><div class="card" id="qlist"><h2>Recent reports</h2><div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.8rem">${filters.map((filter) => `<button class="btn ${state.filter === filter ? '' : 'ghost'}" data-act="staff-filter" data-v="${escapeHtml(filter)}" style="min-height:36px;padding:.3rem .8rem;font-size:.85rem">${escapeHtml(filter)}</button>`).join('')}</div><input id="sq" type="search" placeholder="Search reports" aria-label="Search reports" value="${escapeHtml(state.search)}"><div class="tw" style="margin-top:.6rem"><table><thead><tr><th>Request</th><th>Location</th><th>Requester</th><th>Received</th><th>Status</th></tr></thead><tbody id="qbody">${staffReports()}</tbody></table></div></div>${selected ? `<div class="card"><h2>${escapeHtml(selected.title)}</h2><p class="mut sm">${escapeHtml(selected.reportNumber)} · ${escapeHtml(selected.category)} · ${badge(selected.status)}</p><p>${escapeHtml(selected.desc)}</p><p class="sm"><b>Location:</b> ${escapeHtml(selected.building || selected.bldg)}, floor ${escapeHtml(selected.floor)}, ${escapeHtml(selected.room)}<br><b>Requester:</b> ${escapeHtml(profileName(owner))}${owner?.user_identifier ? ` (${escapeHtml(owner.user_identifier)})` : ''}</p>${selected.photo ? `<img src="${escapeHtml(selected.photo)}" alt="Uploaded evidence" style="max-width:100%;border-radius:12px">` : '<p class="sm mut">No photo attached.</p>'}${canManage ? `${select('ns', 'Change status', STAGES, selected.status)}<label for="nc">Update for the student</label><textarea id="nc" maxlength="2000" style="min-height:70px"></textarea>${fieldError('status')}<div style="display:flex;gap:.6rem;margin-top:.8rem;flex-wrap:wrap"><button class="btn" data-act="staff-update" ${state.busy ? 'disabled' : ''}>${state.busy ? 'Saving…' : 'Save update'}</button></div>` : '<p class="sm mut">This report is outside your status-update permissions.</p>'}</div>` : '<div class="card mut">Select a report to see its photo and location, change its status, or add an update.</div>'}</div>${isAdmin() ? approvalsPanel() : ''}</div>`;
+  return `<div style="background:var(--sb);color:#fff;padding:.8rem 1.2rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap"><div class="brand"><span class="logo">NU</span>NU Buddy ${state.profile.role === 'security_guard' ? 'Security' : 'Facilities'}</div><span style="flex:1"></span><span class="sm">${escapeHtml(fullName())} · ${ROLE_LABEL[state.profile.role]}</span><button class="btn gold" data-act="askout" style="min-height:40px">Log Out</button></div>
+    <div class="pad staff-dashboard" style="max-width:1200px">
+      <h1>Good ${greeting()}, ${escapeHtml(fullName())}.</h1>
+      <p class="mut">Review reports and follow their status through resolution.</p>
+      <div class="grid g4 summary-grid" style="margin-bottom:1rem">${[['All', 'Total reports', counts.total], ['Open', 'Open', counts.open], ['Pending', 'Pending', counts.pending], ['Active', 'Active', counts.active], ['In Progress', 'In Progress', counts.progress], ['Resolved', 'Resolved', counts.resolved]].map(([filter, label, count]) => `<button class="card stat stb ${state.filter === filter ? 'on' : ''}" data-act="staff-filter" data-v="${filter}" aria-pressed="${state.filter === filter}"><b>${count}</b>${label}</button>`).join('')}</div>
+      <div class="qg">
+        <div class="card" id="qlist">
+          <h2>Recent reports</h2>
+          <div class="grid g4 staff-filters">
+            <div>${select('staff-status-filter', 'Status', ['All', 'Open', 'Pending', 'Active', 'In Progress', 'Resolved'], state.filter)}</div>
+            <div>${select('staff-category-filter', 'Category', ['All', ...CATS], state.staffCategory)}</div>
+            <div>${select('staff-building-filter', 'Building', ['All', ...BLDG], state.staffBuilding)}</div>
+            <div>${select('staff-date-filter', 'Date received', ['All', 'Last 7 days', 'Last 30 days', 'Older than 30 days'], state.staffDate === '7days' ? 'Last 7 days' : state.staffDate === '30days' ? 'Last 30 days' : state.staffDate === 'older' ? 'Older than 30 days' : 'All')}</div>
+          </div>
+          <input id="sq" type="search" placeholder="Search reports" aria-label="Search reports" value="${escapeHtml(state.search)}">
+          <div class="tw" style="margin-top:.6rem">
+            <table>
+              <thead><tr><th>Request</th><th>Category</th><th>Location</th><th>Requester</th><th>Received</th><th>Status</th></tr></thead>
+              <tbody id="qbody">${staffReports()}</tbody>
+            </table>
+          </div>
+        </div>
+        ${selected ? `<div class="card"><h2>${escapeHtml(selected.title)}</h2><p class="mut sm">${escapeHtml(selected.reportNumber)} · ${escapeHtml(selected.category)} · ${badge(selected.status)}</p><p>${escapeHtml(selected.desc)}</p><p class="sm"><b>Location:</b> ${escapeHtml(selected.building || selected.bldg)}, floor ${escapeHtml(selected.floor)}, ${escapeHtml(selected.room)}<br><b>Requester:</b> ${escapeHtml(profileName(owner))}${owner?.user_identifier ? ` (${escapeHtml(owner.user_identifier)})` : ''}</p>${selected.photo ? `<img src="${escapeHtml(selected.photo)}" alt="Uploaded evidence" style="max-width:100%;border-radius:12px">` : '<p class="sm mut">No photo attached.</p>'}${canManage ? `${select('ns', 'Change status', STAGES, selected.status)}<label for="nc">Update for the student</label><textarea id="nc" maxlength="2000" style="min-height:70px"></textarea>${fieldError('status')}<div style="display:flex;gap:.6rem;margin-top:.8rem;flex-wrap:wrap"><button class="btn" data-act="staff-update" ${state.busy ? 'disabled' : ''}>${state.busy ? 'Saving…' : 'Save update'}</button></div>` : '<p class="sm mut">This report is outside your status-update permissions.</p>'}</div>` : '<div class="card mut">Select a report to see its photo and location, change its status, or add an update.</div>'}
+      </div>
+      ${isAdmin() ? approvalsPanel() : ''}
+    </div>`;
 }
 function approvalsPanel() {
   const staffAccounts = state.staffProfiles.filter((profile) => ['facility_admin', 'security_guard'].includes(profile.role));
@@ -529,28 +562,36 @@ async function submitReport() {
     state.busy = false; state.err = { submit: errorText(error) }; render();
   }
 }
-async function saveStatus(report) {
-  const status = value('new-status') || value('ns');
-  const note = value('nc') || value('update-note');
-  if (!STAGES.includes(status)) { state.err = { status: 'Choose a valid report status.' }; render(); return; }
-  if (stageIndex(status) < report.stage) { state.err = { status: 'Report status cannot move backwards.' }; render(); return; }
+async function saveStatus(report, statusOverride = null) {
+  if (state.busy || !canUpdateReportStatus(state.profile)) return;
+  const quickUpdate = statusOverride !== null;
+  const status = statusOverride || value('new-status') || value('ns');
+  const note = quickUpdate ? null : value('nc') || value('update-note');
+  if (!STAGES.includes(status)) { state.err = { status: 'Choose a valid report status.' }; render(); if (quickUpdate) showToast(state.err.status); return; }
+  if (stageIndex(status) < report.stage) { state.err = { status: 'Report status cannot move backwards.' }; render(); if (quickUpdate) showToast(state.err.status); return; }
+  state.statusUpdatingReportId = quickUpdate ? report.id : null;
   state.busy = true; state.err = {}; render();
   try {
     const { error } = await supabase.rpc('update_report_status', { p_report_id: report.id, p_status: status, p_note: note || null });
     if (error) throw error;
   } catch (error) {
     state.busy = false;
-    state.err = { status: errorText(error) };
+    state.statusUpdatingReportId = null;
+    state.err = quickUpdate ? {} : { status: errorText(error) };
     render();
+    if (quickUpdate) showToast(errorText(error));
     return;
   }
   const changedStatus = status !== report.status;
-  state.busy = false;
   try {
     await refreshData();
+    state.busy = false;
+    state.statusUpdatingReportId = null;
     render();
     showToast(changedStatus ? 'Status updated successfully. The report owner was notified.' : 'Report update saved.');
   } catch (error) {
+    state.busy = false;
+    state.statusUpdatingReportId = null;
     state.viewError = `The update was saved, but the latest data could not be loaded: ${errorText(error)}`;
     render();
     showToast('Report update saved, but refresh failed.');
@@ -612,6 +653,27 @@ document.addEventListener('change', (event) => {
     state.err = {}; state.draft.photo = file; state.photoPreview = URL.createObjectURL(file); render();
   } else if (event.target.id === 'rcol') {
     normalizeRegForm(); state.reg.program = ''; render();
+  } else if (event.target.id === 'staff-status-filter') {
+    state.filter = event.target.value;
+    const body = $('#qbody'); if (body) body.innerHTML = staffReports();
+  } else if (event.target.id === 'staff-category-filter') {
+    state.staffCategory = event.target.value;
+    const body = $('#qbody'); if (body) body.innerHTML = staffReports();
+  } else if (event.target.id === 'staff-building-filter') {
+    state.staffBuilding = event.target.value;
+    const body = $('#qbody'); if (body) body.innerHTML = staffReports();
+  } else if (event.target.id === 'staff-date-filter') {
+    state.staffDate = ({ 'Last 7 days': '7days', 'Last 30 days': '30days', 'Older than 30 days': 'older' })[event.target.value] || 'All';
+    const body = $('#qbody'); if (body) body.innerHTML = staffReports();
+  } else if (event.target.id === 'report-category-filter') {
+    state.reportCategory = event.target.value; render();
+  } else if (event.target.id === 'report-building-filter') {
+    state.reportBuilding = event.target.value; render();
+  } else if (event.target.id === 'report-date-filter') {
+    state.reportDate = ({ 'Last 7 days': '7days', 'Last 30 days': '30days', 'Older than 30 days': 'older' })[event.target.value] || 'All'; render();
+  } else if (event.target.matches('select[data-act="queue-status"]')) {
+    const report = state.reports.find((item) => item.id === event.target.dataset.id);
+    if (report && event.target.value !== report.status) void saveStatus(report, event.target.value);
   } else if (state.view === 'report') persistReportDraft();
 });
 document.addEventListener('keydown', (event) => {

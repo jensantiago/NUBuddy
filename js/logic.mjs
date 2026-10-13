@@ -9,6 +9,17 @@ export function registrationPasswordChecks(password = '', confirmation = '') {
   };
 }
 
+export function reportMatchesDateFilter(createdAt, filter, now = Date.now()) {
+  if (filter === 'All') return true;
+  const created = new Date(createdAt).getTime();
+  if (!Number.isFinite(created)) return false;
+  const days = filter === '7days' ? 7 : 30;
+  const cutoff = now - days * 24 * 60 * 60 * 1000;
+  if (filter === '7days' || filter === '30days') return created >= cutoff;
+  if (filter === 'older') return created < cutoff;
+  return false;
+}
+
 export function canUpdateReportStatus(profile) {
   return profile?.account_status === 'approved'
     && ['facility_admin', 'security_guard'].includes(profile.role);
