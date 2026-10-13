@@ -363,6 +363,7 @@ function render() {
   if (!state.user) {
     page = ({ login, register: registration, forgot, reset: resetPassword })[state.view] || login;
     app.innerHTML = page();
+    updateRegistrationPasswordFeedback();
     return;
   }
   if (state.view === 'reset') { app.innerHTML = resetPassword(); return; }
