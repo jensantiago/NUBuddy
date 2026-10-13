@@ -19,8 +19,9 @@ const PROGS = {
   'Senior High School': ['STEM', 'ABM', 'HUMSS', 'GAS', 'ICT'],
 };
 const CAMPUSES = ['Manila', 'Baliwag', 'Clark', 'Dasmariñas', 'Laguna', 'Lipa', 'Fairview'];
+const requestedRegistration = new URLSearchParams(window.location.search).get('register') === '1';
 const state = {
-  view: 'login', user: null, profile: null, reports: [], notifications: [], staffProfiles: [],
+  view: requestedRegistration ? 'register' : 'login', user: null, profile: null, reports: [], notifications: [], staffProfiles: [],
   pendingProfiles: [], viewError: '', err: {}, reg: { step: 1, role: 'student' }, draft: {},
   selected: null, menu: false, drawer: false, modal: false, toast: '', busy: false, statusUpdatingReportId: null,
   search: '', reportSearch: '', filter: 'Open', reportCategory: 'All', reportBuilding: 'All', reportDate: 'All', staffCategory: 'All', staffBuilding: 'All', staffDate: 'All', photoPreview: '', resetEmail: '',
@@ -181,7 +182,7 @@ async function loadProfile(session, eventName = '', version = authStateVersion) 
     state.notifications = [];
     state.staffProfiles = [];
     state.pendingProfiles = [];
-    state.view = 'login';
+    state.view = requestedRegistration ? 'register' : 'login';
     state.modal = false;
     render();
     return;
