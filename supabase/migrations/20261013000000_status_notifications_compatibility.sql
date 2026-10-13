@@ -17,7 +17,13 @@ alter table public.notifications
   alter column title set not null;
 
 
-create or replace function public.update_report_status(p_report_id uuid, p_status text, p_note text default null)
+drop function public.update_report_status(uuid, text, text);
+
+create function public.update_report_status(
+  p_report_id uuid,
+  p_status text,
+  p_note text default null
+)
 returns public.reports
 language plpgsql
 security definer
