@@ -1,5 +1,14 @@
 export const STATUSES = ['Submitted', 'Under Review', 'In Progress', 'Resolved'];
 
+export function registrationPasswordChecks(password = '', confirmation = '') {
+  return {
+    length: password.length >= 8,
+    uppercase: /[A-Z]/.test(password),
+    number: /\d/.test(password),
+    matching: confirmation.length > 0 && password === confirmation,
+  };
+}
+
 export function canUpdateReportStatus(profile) {
   return profile?.account_status === 'approved'
     && ['facility_admin', 'security_guard'].includes(profile.role);

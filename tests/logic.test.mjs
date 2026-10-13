@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { canUpdateReportStatus, greeting, reportCounts, ROLE_DOMAINS, schoolRoleForEmail, STATUSES } from '../js/logic.mjs';
+import { canUpdateReportStatus, greeting, registrationPasswordChecks, reportCounts, ROLE_DOMAINS, schoolRoleForEmail, STATUSES } from '../js/logic.mjs';
 
 const facultyMigration = readFileSync(new URL('../supabase/migrations/20261013130737_faculty_reporting.sql', import.meta.url), 'utf8');
 const backendMigration = readFileSync(new URL('../supabase/migrations/20261008000000_nu_buddy_backend.sql', import.meta.url), 'utf8');
@@ -43,6 +43,15 @@ test('only approved staff can update report status, regardless of category', () 
   assert.equal(canUpdateReportStatus({ role: 'security_guard', account_status: 'pending' }), false);
   assert.equal(canUpdateReportStatus({ role: 'facility_admin', account_status: 'rejected' }), false);
   assert.equal(canUpdateReportStatus(null), false);
+});
+
+test('registration password checks update each requirement and confirmation match', () => {
+  assert.deepEqual(registrationPasswordChecks(), { length: false, uppercase: false, number: false, matching: false });
+  assert.deepEqual(registrationPasswordChecks('short'), { length: false, uppercase: false, number: false, matching: false });
+  assert.deepEqual(registrationPasswordChecks('longenough', 'longenough'), { length: true, uppercase: false, number: false, matching: true });
+  assert.deepEqual(registrationPasswordChecks('Longenough', 'Longenough'), { length: true, uppercase: true, number: false, matching: true });
+  assert.deepEqual(registrationPasswordChecks('Long1234', 'Long123'), { length: true, uppercase: true, number: true, matching: false });
+  assert.deepEqual(registrationPasswordChecks('Long1234', 'Long1234'), { length: true, uppercase: true, number: true, matching: true });
 });
 
 test('school email role matching accepts official domains and only the exact development account', () => {

@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { isSupabaseConfigured, SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from './config.js';
-import { canUpdateReportStatus, greeting, localDate, localDateTime, reportCounts, ROLE_DOMAINS, schoolRoleForEmail, STATUSES } from './logic.mjs';
+import { canUpdateReportStatus, greeting, localDate, localDateTime, registrationPasswordChecks, reportCounts, ROLE_DOMAINS, schoolRoleForEmail, STATUSES } from './logic.mjs';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: true },
@@ -242,7 +242,7 @@ function registration() {
   if (form.step === 1) {
     body = `<div style="display:flex;gap:.5rem;margin:1rem 0;flex-wrap:wrap">${roleOptions.map(([key, label]) => `<button class="btn ${role === key ? '' : 'ghost'}" style="flex:1" data-act="reg-role" data-v="${key}">${label}</button>`).join('')}</div><h2>Account information</h2><div class="grid g2"><div>${input('rname', 'Full name', { value: form.fullName, autocomplete: 'name', max: 120 })}</div><div>${input('rid', student ? 'Student ID' : role === 'faculty' ? 'Faculty ID' : 'Employee / guard ID', { value: form.identifier, max: 40 })}</div><div>${select('rcampus', 'Campus', CAMPUSES, form.campus)}</div>${student ? `<div>${select('rcol', 'College / School', Object.keys(PROGS), form.college)}</div>` : ''}</div>${student ? select('rpg', 'Program / Course', form.college ? (PROGS[form.college] || []).concat('Other (not listed)') : [], form.program, form.college ? 'Select your program…' : 'Select a college first') : ''}${student && form.program === 'Other (not listed)' ? input('rpo', 'Your program name', { value: form.otherProgram, max: 120 }) : ''}${input('rem', 'School email', { type: 'email', placeholder: `name@${ROLE_DOMAINS[role]}`, value: form.email, autocomplete: 'email', max: 254 })}<p class="sm mut">Your role is determined by your verified school email domain. Facilities admin and security guard accounts require administrator approval.</p>${fieldError('register')}<button class="btn block" style="margin-top:1rem" data-act="register-next">Continue</button>`;
   } else if (form.step === 2) {
-    body = `<h2 style="margin-top:1rem">Create your password</h2><p class="mut">Use at least 8 characters, including an uppercase letter and a number.</p>${input('pw1', 'Password', { type: 'password', autocomplete: 'new-password' })}${input('pw2', 'Confirm password', { type: 'password', autocomplete: 'new-password' })}${fieldError('password')}<div style="display:flex;gap:.6rem;margin-top:1rem"><button class="btn ghost" data-act="register-back">Back</button><button class="btn" style="flex:1" data-act="register-submit" ${state.busy ? 'disabled' : ''}>${state.busy ? 'Creating account…' : 'Create account'}</button></div>`;
+    body = `<h2 style="margin-top:1rem">Create your password</h2>${input('pw1', 'Password', { type: 'password', autocomplete: 'new-password' })}<ul class="password-checklist" aria-label="Password requirements">${[['length', 'At least 8 characters'], ['uppercase', 'At least one uppercase letter (A–Z)'], ['number', 'At least one number (0–9)']].map(([key, label]) => `<li class="password-check" id="pw-check-${key}" aria-live="polite"><span class="checkmark" aria-hidden="true">○</span>${label}</li>`).join('')}</ul>${input('pw2', 'Confirm password', { type: 'password', autocomplete: 'new-password' })}<p class="password-check" id="pw-check-matching" aria-live="polite"><span class="checkmark" aria-hidden="true">○</span><span data-label>Passwords must match</span></p>${fieldError('password')}<div style="display:flex;gap:.6rem;margin-top:1rem"><button class="btn ghost" data-act="register-back">Back</button><button class="btn" style="flex:1" data-act="register-submit" disabled>${state.busy ? 'Creating account…' : 'Create account'}</button></div>`;
   } else {
     body = `<div style="text-align:center;margin-top:1.2rem"><h2>Check your school email</h2><p class="mut">We sent a verification link to <b>${escapeHtml(form.email)}</b>. Open it to verify your address before logging in.${['facility_admin', 'security_guard'].includes(form.role) ? ' Your account will then wait for administrator approval.' : ''}</p><button class="btn block" data-act="to-login">Back to log in</button></div>`;
   }
@@ -381,8 +381,29 @@ function persistReportDraft() {
 }
 function strongPassword(password) { return password.length >= 8 && /[A-Z]/.test(password) && /\d/.test(password); }
 function passwordError(password) {
-  const missing = [password.length < 8 && '8 or more characters', !/[A-Z]/.test(password) && 'an uppercase letter', !/\d/.test(password) && 'a number'].filter(Boolean);
+  const checks = registrationPasswordChecks(password);
+  const missing = [!checks.length && '8 or more characters', !checks.uppercase && 'an uppercase letter', !checks.number && 'a number'].filter(Boolean);
   return missing.length ? `Password needs ${missing.join(', ')}.` : '';
+}
+function updateRegistrationPasswordFeedback() {
+  if (state.view !== 'register' || state.reg.step !== 2) return;
+  const checks = registrationPasswordChecks($('#pw1')?.value || '', $('#pw2')?.value || '');
+  Object.entries(checks).forEach(([key, met]) => {
+    const item = $('#pw-check-' + key);
+    if (!item) return;
+    item.classList.toggle('met', met);
+    item.querySelector('.checkmark').textContent = met ? '✓' : '○';
+  });
+  const button = $('[data-act="register-submit"]');
+  if (button) button.disabled = state.busy || !Object.values(checks).every(Boolean);
+  const matchingItem = $('#pw-check-matching');
+  if (matchingItem) {
+    const confirmation = $('#pw2')?.value || '';
+    matchingItem.querySelector('[data-label]').textContent = checks.matching
+      ? 'Passwords match'
+      : confirmation ? 'Passwords do not match' : 'Passwords must match';
+    matchingItem.classList.toggle('invalid', Boolean(confirmation) && !checks.matching);
+  }
 }
 function normalizeRegForm() {
   const form = state.reg;
@@ -566,6 +587,7 @@ async function logout() {
 }
 
 document.addEventListener('input', (event) => {
+  if (event.target.id === 'pw1' || event.target.id === 'pw2') updateRegistrationPasswordFeedback();
   if (state.view === 'report' && event.target.id !== 'ph') persistReportDraft();
   if (event.target.id === 'sq') { state.search = event.target.value; const body = $('#qbody'); if (body) body.innerHTML = staffReports(); }
   if (event.target.id === 'report-search') {
