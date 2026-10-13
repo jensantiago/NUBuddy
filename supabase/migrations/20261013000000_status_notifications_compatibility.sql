@@ -16,35 +16,6 @@ alter table public.notifications
   alter column title set default 'Report status updated',
   alter column title set not null;
 
-create or replace function app_private.record_report_creation()
-returns trigger
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  v_old_status_column text;
-begin
-  select case
-    when exists (
-      select 1 from information_schema.columns
-      where table_schema = 'public' and table_name = 'report_history' and column_name = 'old_status'
-    ) then 'old_status'
-    when exists (
-      select 1 from information_schema.columns
-      where table_schema = 'public' and table_name = 'report_history' and column_name = 'previous_status'
-    ) then 'previous_status'
-  end into v_old_status_column;
-  if v_old_status_column is null then
-    raise exception 'report_history must have an old_status or previous_status column.';
-  end if;
-  execute format(
-    'insert into public.report_history(report_id, %I, new_status, changed_by, note) values ($1, $2, $3, $4, $5)',
-    v_old_status_column
-  ) using new.id, null::text, new.status, auth.uid(), null::text;
-  return new;
-end;
-$$;
 
 create or replace function public.update_report_status(p_report_id uuid, p_status text, p_note text default null)
 returns public.reports
