@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { isSupabaseConfigured, SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from './config.js';
-import { greeting, localDate, localDateTime, reportCounts, ROLE_DOMAINS, schoolRoleForEmail, STATUSES } from './logic.mjs';
+import { canUpdateReportStatus, greeting, localDate, localDateTime, reportCounts, ROLE_DOMAINS, schoolRoleForEmail, STATUSES } from './logic.mjs';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: true },
@@ -9,7 +9,6 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
 const STAGES = STATUSES;
 const ROLE_LABEL = { student: 'Student', facility_admin: 'Facilities Admin', security_guard: 'Security Guard' };
 const CATS = ['Broken Air Conditioner', 'Damaged Chair', 'Electrical Problem', 'Locked Classroom', 'Missing Equipment', 'Damaged Facility', 'Safety / Security', 'Other'];
-const GUARD_CATS = ['Safety / Security', 'Locked Classroom', 'Electrical Problem'];
 const BLDG = ['Main Building', 'Annex Building', 'Engineering Building', 'Library', 'Gymnasium', 'Cafeteria'];
 const PROGS = {
   'College of Computing and Information Technologies': ['BS Computer Science', 'BS Information Technology', 'BS Information Systems', 'BS Entertainment and Multimedia Computing'],
@@ -29,6 +28,8 @@ const state = {
 };
 let authStateVersion = 0;
 let logoutInProgress = false;
+let userDataChannel = null;
+let userDataChannelId = null;
 
 const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
@@ -95,7 +96,8 @@ async function refreshData() {
   state.viewError = '';
   const [reportResult, notificationResult] = await Promise.all([
     supabase.from('reports').select('*, report_history(*)').order('created_at', { ascending: false }),
-    supabase.from('notifications').select('id, report_id, message, is_read, created_at').order('created_at', { ascending: false }),
+    supabase.from('notifications').select('id, report_id, title, message, is_read, created_at')
+      .eq('recipient_id', state.user.id).order('created_at', { ascending: false }),
   ]);
   if (reportResult.error) throw reportResult.error;
   if (notificationResult.error) throw notificationResult.error;
@@ -128,9 +130,51 @@ async function refreshData() {
     state.pendingProfiles = data || [];
   }
 }
+async function refreshNotifications() {
+  if (!state.user || !state.profile || state.profile.account_status !== 'approved') return;
+  const { data, error } = await supabase.from('notifications')
+    .select('id, report_id, title, message, is_read, created_at')
+    .eq('recipient_id', state.user.id)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  state.notifications = data || [];
+  state.viewError = '';
+  if (state.view !== 'report') render();
+}
+function refreshFromRealtime() {
+  void refreshData().then(() => {
+    if (state.view !== 'report') render();
+  }).catch((error) => {
+    state.viewError = errorText(error);
+    if (state.view !== 'report') render();
+  });
+}
+function stopUserDataSubscription() {
+  if (userDataChannel) void supabase.removeChannel(userDataChannel);
+  userDataChannel = null;
+  userDataChannelId = null;
+}
+function subscribeToUserData(userId) {
+  if (userDataChannelId === userId) return;
+  stopUserDataSubscription();
+  userDataChannelId = userId;
+  userDataChannel = supabase.channel(`user-data-${userId}`)
+    .on('postgres_changes', {
+      event: 'INSERT', schema: 'public', table: 'notifications', filter: `recipient_id=eq.${userId}`,
+    }, refreshFromRealtime)
+    .on('postgres_changes', {
+      event: 'UPDATE', schema: 'public', table: 'reports', filter: `owner_id=eq.${userId}`,
+    }, refreshFromRealtime)
+    .subscribe((status, error) => {
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        console.error('REALTIME: user data subscription failed', { status, message: error?.message });
+      }
+    });
+}
 async function loadProfile(session, eventName = '', version = authStateVersion) {
   if (version !== authStateVersion) return;
   if (!session?.user) {
+    stopUserDataSubscription();
     console.info('AUTH PROFILE: signed out');
     state.user = null;
     state.profile = null;
@@ -143,7 +187,10 @@ async function loadProfile(session, eventName = '', version = authStateVersion) 
     render();
     return;
   }
-  if (state.user?.id === session.user.id && state.profile && eventName !== 'PASSWORD_RECOVERY') return;
+  if (state.user?.id === session.user.id && state.profile && eventName !== 'PASSWORD_RECOVERY') {
+    if (state.profile.account_status === 'approved') subscribeToUserData(session.user.id);
+    return;
+  }
   console.info('AUTH PROFILE: load started', { userId: session.user.id, eventName });
   state.user = session.user;
   try {
@@ -151,6 +198,8 @@ async function loadProfile(session, eventName = '', version = authStateVersion) 
     if (error) throw error;
     if (version !== authStateVersion) return;
     state.profile = data;
+    if (data.account_status === 'approved') subscribeToUserData(session.user.id);
+    else stopUserDataSubscription();
     if (!session.user.email_confirmed_at) {
       state.view = 'verify-required';
     } else if (data.account_status !== 'approved') {
@@ -252,17 +301,17 @@ function matchesFilter(report, filter) {
 function reportDetail() {
   const report = state.reports.find((item) => item.id === state.selected);
   if (!report) return reportList('My Reports');
-  var canManage = isAdmin() || (state.profile.role === 'security_guard' && GUARD_CATS.includes(report.category));
+  var canManage = canUpdateReportStatus(state.profile);
   var owner = state.staffProfiles.find((profile) => profile.user_id === report.owner);
   return `<button class="btn ghost" data-act="nav" data-v="${isStaff() ? 'staff' : 'reports'}" style="margin-bottom:1rem">← Back to reports</button><div class="grid g2" style="align-items:start"><div class="card"><div style="display:flex;justify-content:space-between;gap:.5rem;flex-wrap:wrap"><h2>${escapeHtml(report.title)}</h2>${badge(report.status)}</div><p class="mut sm">${escapeHtml(report.reportNumber)} · ${escapeHtml(report.category)}</p><p>${escapeHtml(report.desc)}</p><p class="sm"><b>Location:</b> ${escapeHtml(report.building || report.bldg)}, floor ${escapeHtml(report.floor)}, ${escapeHtml(report.room)}</p>${isStaff() ? `<p class="sm"><b>Requester:</b> ${escapeHtml(profileName(owner))}${owner?.user_identifier ? ` (${escapeHtml(owner.user_identifier)})` : ''}</p>` : ''}${report.photo ? `<img src="${escapeHtml(report.photo)}" alt="Photo evidence" style="max-width:100%;border-radius:12px">` : '<p class="sm mut">No photo attached.</p>'}<p class="sm mut">Submitted ${localDateTime(report.createdAt)}</p></div><div class="card"><h2>Progress</h2><ol class="tl">${STAGES.map((stage, index) => { const entry = report.history.find((item) => item.stage === index); const cls = index < report.stage || (index === report.stage && index === 3) ? 'done' : index === report.stage ? 'cur' : ''; return `<li class="${cls}"><span class="dot">${cls === 'done' ? '✓' : cls === 'cur' ? '●' : ''}</span><b>${stage}</b><br><span class="sm mut">${entry ? localDateTime(entry.at) : 'Waiting'}</span>${entry?.note ? `<br><span class="sm">${escapeHtml(entry.note)}</span>` : ''}</li>`; }).join('')}</ol>${canManage ? `<hr style="border:0;border-top:1px solid var(--line);margin:1rem 0">${select('new-status', 'Change status', STAGES, report.status)}<label for="update-note">Update note for the student</label><textarea id="update-note" maxlength="2000" style="min-height:70px"></textarea>${fieldError('status')}<button class="btn" style="margin-top:.8rem" data-act="save-status" ${state.busy ? 'disabled' : ''}>${state.busy ? 'Saving…' : 'Save update'}</button>` : isStaff() ? '<p class="sm mut">This report is outside your status-update permissions.</p>' : ''}</div></div>`;
   if (!report) return reportList('My Reports');
-  var canManage = isAdmin() || (state.profile.role === 'security_guard' && GUARD_CATS.includes(report.category));
+  var canManage = canUpdateReportStatus(state.profile);
   var owner = state.staffProfiles.find((profile) => profile.user_id === report.owner);
   return `<button class="btn ghost" data-act="nav" data-v="${isStaff() ? 'staff' : 'reports'}" style="margin-bottom:1rem">← Back to reports</button><div class="grid g2" style="align-items:start"><div class="card"><div style="display:flex;justify-content:space-between;gap:.5rem;flex-wrap:wrap"><h2>${escapeHtml(report.title)}</h2>${badge(report.status)}</div><p class="mut sm">${escapeHtml(report.reportNumber)} · ${escapeHtml(report.category)}</p><p>${escapeHtml(report.desc)}</p><p class="sm"><b>Location:</b> ${escapeHtml(report.building || report.bldg)}, floor ${escapeHtml(report.floor)}, ${escapeHtml(report.room)}</p>${isStaff() ? `<p class="sm"><b>Requester:</b> ${escapeHtml(profileName(owner))}${owner?.user_identifier ? ` (${escapeHtml(owner.user_identifier)})` : ''}</p>` : ''}${report.photo ? `<img src="${escapeHtml(report.photo)}" alt="Photo evidence" style="max-width:100%;border-radius:12px">` : '<p class="sm mut">No photo attached.</p>'}<p class="sm mut">Submitted ${localDateTime(report.createdAt)}</p></div><div class="card"><h2>Progress</h2><ol class="tl">${STAGES.map((stage, index) => { const entry = report.history.find((item) => item.stage === index); const cls = index < report.stage || (index === report.stage && index === 3) ? 'done' : index === report.stage ? 'cur' : ''; return `<li class="${cls}"><span class="dot">${cls === 'done' ? '✓' : cls === 'cur' ? '●' : ''}</span><b>${stage}</b><br><span class="sm mut">${entry ? localDateTime(entry.at) : 'Waiting'}</span>${entry?.note ? `<br><span class="sm">${escapeHtml(entry.note)}</span>` : ''}</li>`; }).join('')}</ol>${canManage ? `<hr style="border:0;border-top:1px solid var(--line);margin:1rem 0">${select('new-status', 'Change status', STAGES, report.status)}<label for="update-note">Update note for the student</label><textarea id="update-note" maxlength="2000" style="min-height:70px"></textarea>${fieldError('status')}<button class="btn" style="margin-top:.8rem" data-act="save-status" ${state.busy ? 'disabled' : ''}>${state.busy ? 'Saving…' : 'Save update'}</button>` : isStaff() ? '<p class="sm mut">This report is outside your status-update permissions.</p>' : ''}</div></div>`;
 }
 function notificationsView() {
   const notices = state.notifications;
-  return `<div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap"><h1>Notifications</h1>${notices.some((notice) => !notice.is_read) ? '<button class="btn ghost" data-act="read-all">Mark all as read</button>' : ''}</div><div class="card">${notices.length ? notices.map((notice) => `<div class="nf ${notice.is_read ? '' : 'un'}" tabindex="0" data-act="open-notification" data-id="${notice.id}"><span class="${notice.is_read ? '' : 'pt'}" style="${notice.is_read ? 'width:10px' : ''}"></span><div>${escapeHtml(notice.message)}<br><span class="sm mut">${localDateTime(notice.created_at)}</span></div></div>`).join('') : '<p class="mut">No notifications yet. You will be notified when a report changes status.</p>'}</div>`;
+  return `<div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap"><h1>Notifications</h1>${notices.some((notice) => !notice.is_read) ? '<button class="btn ghost" data-act="read-all">Mark all as read</button>' : ''}</div><div class="card">${notices.length ? notices.map((notice) => `<div class="nf ${notice.is_read ? '' : 'un'}" tabindex="0" data-act="open-notification" data-id="${notice.id}"><span class="${notice.is_read ? '' : 'pt'}" style="${notice.is_read ? 'width:10px' : ''}"></span><div><b>${escapeHtml(notice.title || 'Report update')}</b><br>${escapeHtml(notice.message)}<br><span class="sm mut">${localDateTime(notice.created_at)}</span></div></div>`).join('') : '<p class="mut">No notifications yet. You will be notified when a report changes status.</p>'}</div>`;
 }
 function profileView() {
   const profile = state.profile;
@@ -299,7 +348,7 @@ function staffDashboard() {
   const selected = reports.find((report) => report.id === state.selected);
   const filters = ['Open', 'All', 'Pending', 'Active', 'In Progress', 'Resolved', ...CATS];
   const owner = selected && state.staffProfiles.find((profile) => profile.user_id === selected.owner);
-  const canManage = selected && (isAdmin() || (state.profile.role === 'security_guard' && GUARD_CATS.includes(selected.category)));
+  const canManage = selected && canUpdateReportStatus(state.profile);
   return `<div style="background:var(--sb);color:#fff;padding:.8rem 1.2rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap"><div class="brand"><span class="logo">NU</span>NU Buddy ${state.profile.role === 'security_guard' ? 'Security' : 'Facilities'}</div><span style="flex:1"></span><span class="sm">${escapeHtml(fullName())} · ${ROLE_LABEL[state.profile.role]}</span><button class="btn gold" data-act="askout" style="min-height:40px">Log Out</button></div><div class="pad" style="max-width:1200px"><h1>Good ${greeting()}, ${escapeHtml(fullName())}.</h1><p class="mut">Review reports and follow their status through resolution.</p><div class="grid g4" style="margin-bottom:1rem">${[['All', 'Total reports', counts.total], ['Open', 'Open', counts.open], ['Pending', 'Pending', counts.pending], ['Active', 'Active', counts.active], ['In Progress', 'In Progress', counts.progress], ['Resolved', 'Resolved', counts.resolved]].map(([filter, label, count]) => `<button class="card stat stb ${state.filter === filter ? 'on' : ''}" data-act="staff-filter" data-v="${filter}" aria-pressed="${state.filter === filter}"><b>${count}</b>${label}</button>`).join('')}</div><div class="qg"><div class="card" id="qlist"><h2>Recent reports</h2><div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.8rem">${filters.map((filter) => `<button class="btn ${state.filter === filter ? '' : 'ghost'}" data-act="staff-filter" data-v="${escapeHtml(filter)}" style="min-height:36px;padding:.3rem .8rem;font-size:.85rem">${escapeHtml(filter)}</button>`).join('')}</div><input id="sq" type="search" placeholder="Search reports" aria-label="Search reports" value="${escapeHtml(state.search)}"><div class="tw" style="margin-top:.6rem"><table><thead><tr><th>Request</th><th>Location</th><th>Requester</th><th>Received</th><th>Status</th></tr></thead><tbody id="qbody">${staffReports()}</tbody></table></div></div>${selected ? `<div class="card"><h2>${escapeHtml(selected.title)}</h2><p class="mut sm">${escapeHtml(selected.reportNumber)} · ${escapeHtml(selected.category)} · ${badge(selected.status)}</p><p>${escapeHtml(selected.desc)}</p><p class="sm"><b>Location:</b> ${escapeHtml(selected.building || selected.bldg)}, floor ${escapeHtml(selected.floor)}, ${escapeHtml(selected.room)}<br><b>Requester:</b> ${escapeHtml(profileName(owner))}${owner?.user_identifier ? ` (${escapeHtml(owner.user_identifier)})` : ''}</p>${selected.photo ? `<img src="${escapeHtml(selected.photo)}" alt="Uploaded evidence" style="max-width:100%;border-radius:12px">` : '<p class="sm mut">No photo attached.</p>'}${canManage ? `${select('ns', 'Change status', STAGES, selected.status)}<label for="nc">Update for the student</label><textarea id="nc" maxlength="2000" style="min-height:70px"></textarea>${fieldError('status')}<div style="display:flex;gap:.6rem;margin-top:.8rem;flex-wrap:wrap"><button class="btn" data-act="staff-update" ${state.busy ? 'disabled' : ''}>${state.busy ? 'Saving…' : 'Save update'}</button></div>` : '<p class="sm mut">This report is outside your status-update permissions.</p>'}</div>` : '<div class="card mut">Select a report to see its photo and location, change its status, or add an update.</div>'}</div>${isAdmin() ? approvalsPanel() : ''}</div>`;
 }
 function approvalsPanel() {
@@ -459,16 +508,31 @@ async function submitReport() {
   }
 }
 async function saveStatus(report) {
-  const status = value('ns');
+  const status = value('new-status') || value('ns');
   const note = value('nc') || value('update-note');
   if (!STAGES.includes(status)) { state.err = { status: 'Choose a valid report status.' }; render(); return; }
   if (stageIndex(status) < report.stage) { state.err = { status: 'Report status cannot move backwards.' }; render(); return; }
   state.busy = true; state.err = {}; render();
-  const { error } = await supabase.rpc('update_report_status', { p_report_id: report.id, p_status: status, p_note: note || null });
+  try {
+    const { error } = await supabase.rpc('update_report_status', { p_report_id: report.id, p_status: status, p_note: note || null });
+    if (error) throw error;
+  } catch (error) {
+    state.busy = false;
+    state.err = { status: errorText(error) };
+    render();
+    return;
+  }
+  const changedStatus = status !== report.status;
   state.busy = false;
-  if (error) { state.err = { status: errorText(error) }; render(); return; }
-  try { await refreshData(); } catch (refreshError) { state.viewError = errorText(refreshError); }
-  render(); showToast('Report update saved.');
+  try {
+    await refreshData();
+    render();
+    showToast(changedStatus ? 'Status updated successfully. The report owner was notified.' : 'Report update saved.');
+  } catch (error) {
+    state.viewError = `The update was saved, but the latest data could not be loaded: ${errorText(error)}`;
+    render();
+    showToast('Report update saved, but refresh failed.');
+  }
 }
 async function logout() {
   console.info('AUTH LOGOUT: started', { userId: state.user?.id });
@@ -707,6 +771,12 @@ if (isSupabaseConfigured) {
   });
 }
 window.setInterval(() => {
+  if (!document.hidden && state.user && state.profile?.account_status === 'approved') {
+    void refreshNotifications().catch((error) => {
+      state.viewError = errorText(error);
+      if (state.view !== 'report') render();
+    });
+  }
   if (['dash', 'staff'].includes(state.view)) render();
-}, 30000);
+}, 15000);
 render();

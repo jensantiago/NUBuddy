@@ -1,4 +1,9 @@
 export const STATUSES = ['Submitted', 'Under Review', 'In Progress', 'Resolved'];
+
+export function canUpdateReportStatus(profile) {
+  return profile?.account_status === 'approved'
+    && ['facility_admin', 'security_guard'].includes(profile.role);
+}
 export const ROLE_DOMAINS = {
   student: 'students.nu.edu.ph',
   facility_admin: 'admin.nu.edu.ph',

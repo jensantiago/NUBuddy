@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { greeting, reportCounts, ROLE_DOMAINS, schoolRoleForEmail, STATUSES } from '../js/logic.mjs';
+import { canUpdateReportStatus, greeting, reportCounts, ROLE_DOMAINS, schoolRoleForEmail, STATUSES } from '../js/logic.mjs';
 
 test('Philippine-time greeting boundaries are inclusive at the specified minute', () => {
   const cases = [
@@ -27,6 +27,15 @@ test('dashboard counts use the shared exact status definitions', () => {
     active: 2,
     progress: 1,
     resolved: 1,
+  });
+
+  test('only approved staff can update report status, regardless of category', () => {
+    assert.equal(canUpdateReportStatus({ role: 'facility_admin', account_status: 'approved' }), true);
+    assert.equal(canUpdateReportStatus({ role: 'security_guard', account_status: 'approved' }), true);
+    assert.equal(canUpdateReportStatus({ role: 'student', account_status: 'approved' }), false);
+    assert.equal(canUpdateReportStatus({ role: 'security_guard', account_status: 'pending' }), false);
+    assert.equal(canUpdateReportStatus({ role: 'facility_admin', account_status: 'rejected' }), false);
+    assert.equal(canUpdateReportStatus(null), false);
   });
 });
 
