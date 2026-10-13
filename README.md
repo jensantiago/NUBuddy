@@ -5,7 +5,7 @@ NU Buddy is a static HTML/CSS/JavaScript campus facility-reporting portal backed
 ## Supabase setup
 
 1. Create a project at [supabase.com/dashboard](https://supabase.com/dashboard). Keep the database password and any service-role/secret keys out of this repository and browser code.
-2. In the Supabase SQL Editor, run [`supabase/migrations/20261008000000_nu_buddy_backend.sql`](supabase/migrations/20261008000000_nu_buddy_backend.sql) for a new project, followed by [`supabase/migrations/20261013000000_status_notifications_compatibility.sql`](supabase/migrations/20261013000000_status_notifications_compatibility.sql). The second migration applies the status/notification compatibility fixes without recreating tables or deleting data. For a project where the first migration is already installed, run only the second migration; do not rerun the first migration.
+2. In the Supabase SQL Editor, run [`supabase/migrations/20261008000000_nu_buddy_backend.sql`](supabase/migrations/20261008000000_nu_buddy_backend.sql), [`supabase/migrations/20261013000000_status_notifications_compatibility.sql`](supabase/migrations/20261013000000_status_notifications_compatibility.sql), and [`supabase/migrations/20261013130737_faculty_reporting.sql`](supabase/migrations/20261013130737_faculty_reporting.sql), in that order, for a new project. If earlier migrations are already installed, run only missing migrations; do not rerun an applied migration.
 3. In **Authentication → Providers → Email**, keep email/password enabled and turn on email confirmations. Customize the confirmation and recovery templates if needed.
 4. In **Authentication → URL Configuration**, set the local Site URL to `http://localhost:8000` and add `http://localhost:8000/**` to the redirect allow list. Add the deployed site origin and its redirect pattern before deploying.
 5. The supplied project URL and **publishable** key are already configured in [`js/config.js`](js/config.js). For a different Supabase project, copy its Project URL and publishable key (the legacy `anon` key is also publishable) from **Project Settings → API** and replace those values. These are the only Supabase values permitted in browser code. Never use a service-role or secret key here.
@@ -24,7 +24,7 @@ where p.user_id = u.id
 	and u.email_confirmed_at is not null;
 ```
 
-Replace the example with the authorized mailbox. After this bootstrap, approved Facilities administrators can approve or reject pending staff and guard accounts in the app. They cannot approve themselves. New student accounts are eligible after email verification; staff and guards remain pending until an administrator approves them.
+Replace the example with the authorized mailbox. After this bootstrap, approved Facilities administrators can approve or reject pending staff and guard accounts in the app. They cannot approve themselves. New student and faculty accounts are eligible after email verification; Facilities administrators and security guards remain pending until an administrator approves them.
 
 ## Run locally
 
@@ -43,8 +43,8 @@ Deploy the project folder as a static site to any HTTPS static host (for example
 ## Implemented
 
 - Supabase sign-up, sign-in, email confirmation, password recovery, password change, session persistence, and logout.
-- Account roles are derived from verified Auth emails: `@students.nu.edu.ph` → student, `@admin.nu.edu.ph` → Facilities admin, and `@guard.nu.edu.ph` → security guard. The only temporary personal-email exception is the exact address `santiagojenina683@gmail.com`, mapped to a pending Facilities admin account; other Gmail and personal addresses are rejected. Remove this exception before production use.
-- Student report submission, private photo upload, report lists/details/search/filtering, status history, notifications, read state, and Philippine-time timestamps.
+- Account roles are derived server-side from normalized Auth emails: `@students.nu.edu.ph` → student, `@faculty.nu.edu.ph` → faculty, `@admin.nu.edu.ph` → Facilities admin, and `@guard.nu.edu.ph` → security guard. The only temporary personal-email exception is the exact address `santiagojenina683@gmail.com`, mapped to a pending Facilities admin account; other Gmail and personal addresses are rejected. Remove this exception before production use.
+- Student and faculty report submission, private photo upload, owner-only report lists/details/search/filtering, status history, notifications, read state, and Philippine-time timestamps. Faculty share the student interface and cannot see staff queues or change report status.
 - Approved staff report queues, status changes, notifications, and staff approval/rejection. Security guards and Facilities administrators can update reports in every category; students and unapproved staff cannot.
 - Dashboard totals computed from rows visible under RLS. Pending means Submitted only; Active means Under Review or In Progress; Open excludes only Resolved.
 - Greetings use `Asia/Manila` and refresh while a dashboard remains open. Theme choice is the only app data persisted in browser local storage.
@@ -66,4 +66,7 @@ After applying it, test with separate accounts:
 - **Student:** submit a report, verify it is visible only to its owner, and confirm a notification and updated history appear after approved staff changes its status. Confirm the student cannot change the status or mark another user's notification read.
 - **Security guard:** verify a pending guard cannot access staff actions. After approval and email verification, update reports from every category, confirm backward status changes remain rejected, and confirm a status change creates one owner notification plus a history entry.
 - **Facilities administrator:** verify existing account approval/rejection still works and status updates remain available for every category. Confirm status changes generate owner notifications and note-only updates do not create duplicate status-change notifications.
+- **Faculty:** register using a case-varied `@faculty.nu.edu.ph` email and verify it. Confirm a different domain is rejected for faculty registration; submit a report with a photo; verify only the owner's reports, history, and notifications are visible. Try selecting another user's report by ID and calling the status RPC directly; report access must return no rows and status updates must be denied. Verify staff screens remain unavailable.
 - **Live refresh:** leave the student app open on its dashboard or Notifications page while staff changes a report; confirm its unread count and notification update without signing out or reloading.
+
+Run the local regression and syntax checks with `node --test tests/logic.test.mjs` and `node --check js/cloud-app.js`. Live Auth, RLS, Storage, and direct API checks require the migrations to be applied to a Supabase project and separate test accounts.

@@ -6,6 +6,7 @@ export function canUpdateReportStatus(profile) {
 }
 export const ROLE_DOMAINS = {
   student: 'students.nu.edu.ph',
+  faculty: 'faculty.nu.edu.ph',
   facility_admin: 'admin.nu.edu.ph',
   security_guard: 'guard.nu.edu.ph',
 };
